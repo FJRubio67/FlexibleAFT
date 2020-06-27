@@ -1,0 +1,124 @@
+---
+title: 'Flexible AFT models II: Bayesian + skew-symmetric'
+author: "[F Javier Rubio](https://sites.google.com/site/fjavierrubio67/)"
+date: "25/06/2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Bayesian AFT models with skew-symmetric errors
+
+[Log-skew-symmetric distributions](http://onlinelibrary.wiley.com/doi/10.1002/env.1004/abstract) are univariate models with positive support obtained by transforming the class of [skew-symmetric distributions](http://www.jstor.org/stable/24307231). This class of distributions is very flexible, easy to implement, and contains members that can capture different tail behaviours and shapes, producing also a variety of hazard functions. These distributions represent a flexible alternative to the classical choices such as the log-normal, Gamma, and Weibull distributions. Below, we present an application using real data in the contexts of lung cancer survival using Bayesian [Accelerated Failure Time models](https://en.wikipedia.org/wiki/Accelerated_failure_time_model).:
+
+**References**
+
+1. [Bayesian linear regression with skew-symmetric error distributions with applications to survival analysis](http://dx.doi.org/10.1002/sim.6897)
+
+
+```{r}
+rm(list=ls())
+
+# Required packages
+library(survival)
+library(Rtwalk)
+library(sn)
+library(TeachingDemos)
+
+# Lung cancer data
+data(lung)
+str(lung)
+
+vnames = c("age","sex","ph.ecog")
+
+X = cbind(1,lung$age,lung$sex,lung$ph.ecog)[-14,]
+logY = log(lung$time)[-14]
+n = length(logY)
+
+status = (1-(lung$status-1))[-14]
+#######################################################################################################################################
+# Prior on lambda
+#######################################################################################################################################
+
+c = pi/2
+lpriorlambda = function(lambda) return( dt(c*lambda,df=0.5,log=T) + log(c) )
+
+#######################################################################################################################################
+# Log Skew Normal AFT Model
+#######################################################################################################################################
+
+# Log-likelihood
+llsn <- function(par){
+if(par[5]>0){
+var1 = log(dsn(logY - X%*%par[1:4],0,par[5],par[6])^(1-status)) 
+var2 = log( (1 - psn(logY - X%*%par[1:4],0,par[5],par[6]))^(status)  )
+return(-sum(var1+var2))
+}
+return(Inf)
+} 
+
+# Maximum Likelihood Estimation
+OPT1 = optim(c(7,0,0,0,1,-2),llsn,method="BFGS",control=list(maxit=10000))
+
+init=OPT1$par
+
+# Log Posterior
+
+lpsl <- function(par){
+var1 = log(dsn(logY - X%*%par[1:4],0,par[5],par[6])^(1-status)) 
+var2 = log( (1 - psn(logY - X%*%par[1:4],0,par[5],par[6]))^(status)  )
+#return(-sum(var1+var2)+log(par[5]) )
+ifelse(is.na(sum(var1+var2)),
+return(10000000),
+return(-sum(var1+var2)+log(par[5]) - lpriorlambda(par[6]) ))
+} 
+
+# Simulation from the posterior
+
+Support <- function(x) {
+	((0.1 < x[5]) )	
+}
+
+X0 <- function(x) { init + 0.1*runif(6,-0.1,0.1) }
+
+# It takes a couple of minutes to run
+set.seed(1234)
+info <- Runtwalk( dim=6,  Tr=105000,  Obj=lpsl, Supp=Support, x0=X0(), xp0=X0(), PlotLogPost = FALSE) 
+
+# Thinning and burning the chain
+ind=seq(5000,105000,50)
+str(info)
+
+beta1 = info$output[,1][ind]
+beta2 = info$output[,2][ind]
+beta3 = info$output[,3][ind]
+beta4 = info$output[,4][ind]
+sigma = info$output[,5][ind]
+lambda = info$output[,6][ind]
+
+# Some histograms of the posterior samples
+
+hist(beta1)
+hist(beta2)
+hist(beta3)
+hist(beta4)
+hist(sigma)
+hist(lambda)
+
+#########################################################################
+# Savage-Dickey ratio for log-skew-normal vs log-normal
+#########################################################################
+
+h = bw.nrd0(lambda)
+postgammav <- Vectorize(function(x) mean(dnorm((x-lambda)/h)/h))
+curve(postgammav,-10,1)
+
+BF1 = postgammav(0)/exp(lpriorlambda(0))
+
+# Bayes factor against the model with normal (instead of skew-normal) errors
+# Strong evidence in favour of the log-skew-normal model
+BF1
+log(BF1)
+```

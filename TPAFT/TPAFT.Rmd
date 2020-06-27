@@ -1,0 +1,130 @@
+---
+title: "Flexible AFT models I: MLE"
+author: "[F Javier Rubio](https://sites.google.com/site/fjavierrubio67/)"
+date: "25/06/2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Accelerated Failure Time models with flexible errors
+
+Log-twopiece distributions are univariate models with positive support obtained by transforming the class of [two-piece distributions](https://rpubs.com/FJRubio/twopiece). This class of distributions is very flexible, easy to implement, and contains members that can capture different tail behaviours and shapes, producing also a variety of hazard functions. These distributions represent a flexible alternative to the classical choices such as the log-normal, Gamma, and Weibull distributions. Below, we present an application using real data in the contexts of lung cancer survival using [Accelerated Failure Time models](https://en.wikipedia.org/wiki/Accelerated_failure_time_model).
+
+**References.**
+
+1. [Inference in Two-Piece Location-Scale Models with Jeffreys Priors](http://projecteuclid.org/euclid.ba/1393251764)
+
+2. [Survival and lifetime data analysis with a flexible class of distributions](http://dx.doi.org/10.1080/02664763.2015.1120710)
+
+```{r}
+rm(list=ls())
+
+# Required packages
+library(survival)
+library(twopiece)
+
+# Lung Cancer data
+data(lung)
+str(lung)
+
+vnames = c("age","sex","ph.ecog")
+
+# Remove a missing observation
+X = cbind(1,lung$age,lung$sex,lung$ph.ecog)[-14,]
+logY = log(lung$time)[-14]
+n = length(logY)
+
+status = (1-(lung$status-1))[-14]
+
+#######################################################################################################################################
+# Weibull, lognormal and log-logistic fit using survreg
+#######################################################################################################################################
+
+summary( survreg(Surv(time, status) ~ age+sex+ph.ecog, data=cancer, dist="weibull") )
+
+summary( survreg(Surv(time, status) ~ age+sex+ph.ecog, data=cancer, dist="lognormal") )
+
+summary( survreg(Surv(time, status) ~ age+sex+ph.ecog, data=cancer, dist="loglogistic") )
+
+#######################################################################################################################################
+# Log Normal fit
+#######################################################################################################################################
+
+lln <- function(par){
+if(par[5]>0){
+var1 = log(dnorm(logY - X%*%par[1:4],0,par[5])^(1-status))
+var2 = log( (1 - pnorm(logY - X%*%par[1:4],0,par[5]))^(status)  )
+return(-sum(var1+var2))
+}
+return(Inf)
+} 
+
+OPT4 = optim(c(6,0,0,0,1),lln,control=list(maxit=10000))
+AIC4 = 2*OPT4$value + 2*5
+
+# MLE
+OPT4$par
+#######################################################################################################################################
+# Log two-piece normal fit
+#######################################################################################################################################
+
+lltpn <- function(par){
+if(par[5]>0 & par[6]>-1 & par[6]<1){
+var1 = log(dtp3(logY - X%*%par[1:4],0,par[5],par[6],param="eps",FUN=dnorm)^(1-status) )
+var2 = log( (1 - ptp3(logY - X%*%par[1:4],0,par[5],par[6],param="eps",FUN=pnorm,log.p=F) )^(status) )
+return(-sum(var1+var2))
+}
+return(Inf)
+} 
+
+OPT2 = optim(c(OPT4$par,0.3),lltpn,control=list(maxit=10000))
+AIC2 = 2*OPT2$value + 2*6
+
+# MLE
+OPT2$par
+
+#######################################################################################################################################
+# Log Logistic fit
+#######################################################################################################################################
+
+lll <- function(par){
+if(par[5]>0){
+var1 = log(dlogis(logY - X%*%par[1:4],0,par[5])^(1-status))
+var2 = log( (1 - plogis(logY - X%*%par[1:4],0,par[5]))^(status)  )
+return(-sum(var1+var2))
+}
+return(Inf)
+} 
+
+OPT5 = optim(c(6,0,0,0,0.5),lll,control=list(maxit=10000))
+AIC5 = 2*OPT5$value + 2*5
+
+# MLE
+OPT5$par
+
+#######################################################################################################################################
+# Log two-piece logistic fit 
+#######################################################################################################################################
+
+lltpl <- function(par){
+if(par[5]>0 & par[6]>-1 & par[6]<1){
+var1 = log(dtp3(logY - X%*%par[1:4],0,par[5],par[6],param="eps",FUN=dlogis)^(1-status)) 
+var2 = log( (1 - ptp3(logY - X%*%par[1:4],0,par[5],par[6],param="eps",FUN=plogis,log.p=F))^(status)  )
+return(-sum(var1+var2))
+}
+return(Inf)
+} 
+
+OPT6 = optim(c(OPT5$par,0.2),lltpl,control=list(maxit=10000))
+AIC6 = 2*OPT6$value + 2*6
+
+# MLE
+OPT6$par
+
+# Comparison using AIC
+
+c(AIC2,AIC4,AIC5,AIC6)
+```
